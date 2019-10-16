@@ -517,16 +517,13 @@ def DecodeBase58Check(psz: Union[bytes, str]) -> bytes:
 # extended WIF for segwit (used in 3.0.x; but still used internally)
 # the keys in this dict should be a superset of what Imported Wallets can import
 WIF_SCRIPT_TYPES = {
-    'p2pkh':0,
+    'p2pkh':95,
     'p2wpkh':1,
     'p2wpkh-p2sh':2,
-    'p2sh':5,
+    'p2sh':36,
     'p2wsh':6,
     'p2wsh-p2sh':7
 }
-WIF_SCRIPT_TYPES_INV = inv_dict(WIF_SCRIPT_TYPES)
-
-
 
 def serialize_privkey(secret: bytes, compressed: bool, txin_type: str,
                       internal_use: bool=False) -> str:
