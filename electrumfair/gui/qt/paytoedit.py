@@ -30,14 +30,13 @@ from PyQt5.QtGui import QFontMetrics
 
 from ... import bitcoin
 from ...util import bfh, PrintError
-from ...transaction import TxOutput, push_script
-from ...bitcoin import opcodes
+from ...transaction import TxOutput
 
 from .qrtextedit import ScanQRTextEdit
 from .completion_text_edit import CompletionTextEdit
 from . import util
 
-RE_ALIAS = r'(.*?)\s*\<([0-9A-Za-z]{1,})\>'
+RE_ALIAS = '(.*?)\s*\<([0-9A-Za-z]{1,})\>'
 
 frozen_style = "QWidget { background-color:none; border:none;}"
 normal_style = "QPlainTextEdit { }"
@@ -92,10 +91,12 @@ class PayToEdit(CompletionTextEdit, ScanQRTextEdit, PrintError):
             return bitcoin.TYPE_SCRIPT, script
 
     def parse_script(self, x):
+        from electrum.transaction import opcodes, push_script
         script = ''
         for word in x.split():
             if word[0:3] == 'OP_':
-                opcode_int = opcodes[word]
+                assert word in opcodes.lookup
+                opcode_int = opcodes.lookup[word]
                 assert opcode_int < 256  # opcode is single-byte
                 script += bitcoin.int_to_hex(opcode_int)
             else:

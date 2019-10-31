@@ -304,8 +304,7 @@ class Console(QtWidgets.QPlainTextEdit):
 
     def completions(self):
         cmd = self.getCommand()
-        # note for regex: new words start after ' ' or '(' or ')'
-        lastword = re.split(r'[ ()]', cmd)[-1]
+        lastword = re.split(' |\(|\)',cmd)[-1]
         beginning = cmd[0:-len(lastword)]
 
         path = lastword.split('.')

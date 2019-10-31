@@ -8,10 +8,9 @@ import time
 import csv
 import decimal
 from decimal import Decimal
+import concurrent.futures
 import traceback
-from typing import Sequence, Optional
-
-from aiorpcx.curio import timeout_after, TaskTimeout, TaskGroup
+from typing import Sequence
 
 from .bitcoin import COIN
 from .i18n import _
@@ -64,21 +63,15 @@ class ExchangeBase(PrintError):
     async def get_raw(self, site, get_string):
         # APIs must have https
         url = ''.join(['https://', site, get_string])
-        network = Network.get_instance()
-        proxy = network.proxy if network else None
-        async with make_aiohttp_session(proxy) as session:
+        async with make_aiohttp_session(Network.get_instance().proxy) as session:
             async with session.get(url) as response:
-                response.raise_for_status()
                 return await response.text()
 
     async def get_json(self, site, get_string):
         # APIs must have https
         url = ''.join(['https://', site, get_string])
-        network = Network.get_instance()
-        proxy = network.proxy if network else None
-        async with make_aiohttp_session(proxy) as session:
+        async with make_aiohttp_session(Network.get_instance().proxy) as session:
             async with session.get(url) as response:
-                response.raise_for_status()
                 # set content_type to None to disable checking MIME type
                 return await response.json(content_type=None)
 
@@ -90,6 +83,7 @@ class ExchangeBase(PrintError):
     def name(self):
         return self.__class__.__name__
 
+    @log_exceptions
     async def update_safe(self, ccy):
         try:
             self.print_error("getting fx quotes for", ccy)
@@ -97,35 +91,37 @@ class ExchangeBase(PrintError):
             self.print_error("received fx quotes")
         except BaseException as e:
             self.print_error("failed fx quotes:", repr(e))
-            # traceback.print_exc()
             self.quotes = {}
         self.on_quotes()
 
-    def read_historical_rates(self, ccy, cache_dir) -> Optional[dict]:
+    def update(self, ccy):
+        asyncio.get_event_loop().create_task(self.update_safe(ccy))
+
+    def read_historical_rates(self, ccy, cache_dir):
         filename = os.path.join(cache_dir, self.name() + '_'+ ccy)
-        if not os.path.exists(filename):
-            return None
-        timestamp = os.stat(filename).st_mtime
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                h = json.loads(f.read())
-        except:
-            return None
-        if not h:  # e.g. empty dict
-            return None
-        h['timestamp'] = timestamp
-        self.history[ccy] = h
-        self.on_history()
+        if os.path.exists(filename):
+            timestamp = os.stat(filename).st_mtime
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    h = json.loads(f.read())
+                h['timestamp'] = timestamp
+            except:
+                h = None
+        else:
+            h = None
+        if h:
+            self.history[ccy] = h
+            self.on_history()
         return h
 
     @log_exceptions
     async def get_historical_rates_safe(self, ccy, cache_dir):
         try:
-            self.print_error(f"requesting fx history for {ccy}")
+            self.print_error("requesting fx history for", ccy)
             h = await self.request_history(ccy)
-            self.print_error(f"received fx history for {ccy}")
+            self.print_error("received fx history for", ccy)
         except BaseException as e:
-            self.print_error(f"failed fx history: {repr(e)}")
+            self.print_error("failed fx history:", e)
             #traceback.print_exc()
             return
         filename = os.path.join(cache_dir, self.name() + '_' + ccy)
@@ -150,14 +146,8 @@ class ExchangeBase(PrintError):
     def historical_rate(self, ccy, d_t):
         return self.history.get(ccy, {}).get(d_t.strftime('%Y-%m-%d'), 'NaN')
 
-    async def request_history(self, ccy):
-        raise NotImplementedError()  # implemented by subclasses
-
-    async def get_rates(self, ccy):
-        raise NotImplementedError()  # implemented by subclasses
-
-    async def get_currencies(self):
-        rates = await self.get_rates('')
+    def get_currencies(self):
+        rates = self.get_rates('')
         return sorted([str(a) for (a, b) in rates.items() if b is not None and len(a)==3])
 
 class FairCoop_ChainFaircoin(ExchangeBase):
@@ -242,39 +232,25 @@ def dictinvert(d):
     return inv
 
 def get_exchanges_and_currencies():
-    # load currencies.json from disk
     path = resource_path('currencies.json')
     try:
         with open(path, 'r', encoding='utf-8') as f:
             return json.loads(f.read())
     except:
         pass
-    # or if not present, generate it now.
-    print("cannot find currencies.json. will regenerate it now.")
     d = {}
     is_exchange = lambda obj: (inspect.isclass(obj)
                                and issubclass(obj, ExchangeBase)
                                and obj != ExchangeBase)
     exchanges = dict(inspect.getmembers(sys.modules[__name__], is_exchange))
-
-    async def get_currencies_safe(name, exchange):
+    for name, klass in exchanges.items():
+        exchange = klass(None, None)
         try:
-            d[name] = await exchange.get_currencies()
+            d[name] = exchange.get_currencies()
             print(name, "ok")
         except:
             print(name, "error")
-
-    async def query_all_exchanges_for_their_ccys_over_network():
-        async with timeout_after(10):
-            async with TaskGroup() as group:
-                for name, klass in exchanges.items():
-                    exchange = klass(None, None)
-                    await group.spawn(get_currencies_safe(name, exchange))
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(query_all_exchanges_for_their_ccys_over_network())
-    except Exception as e:
-        pass
+            continue
     with open(path, 'w', encoding='utf-8') as f:
         f.write(json.dumps(d, indent=4, sort_keys=True))
     return d
@@ -340,28 +316,27 @@ class FxThread(ThreadJob):
 
     async def run(self):
         while True:
-            # approx. every 2.5 minutes, refresh spot price
             try:
-                async with timeout_after(150):
-                    await self._trigger.wait()
-                    self._trigger.clear()
-                # we were manually triggered, so get historical rates
-                if self.is_enabled() and self.show_history():
-                    self.exchange.get_historical_rates(self.ccy, self.cache_dir)
-            except TaskTimeout:
+                await asyncio.wait_for(self._trigger.wait(), 150)
+            except concurrent.futures.TimeoutError:
                 pass
+            else:
+                self._trigger.clear()
+                if self.is_enabled():
+                    if self.show_history():
+                        self.exchange.get_historical_rates(self.ccy, self.cache_dir)
             if self.is_enabled():
-                await self.exchange.update_safe(self.ccy)
+                self.exchange.update(self.ccy)
 
     def is_enabled(self):
-        return bool(self.config.get('use_exchange_rate', DEFAULT_ENABLED))
+        return bool(self.config.get('use_exchange_rate'))
 
     def set_enabled(self, b):
         self.config.set_key('use_exchange_rate', bool(b))
         self.trigger_update()
 
-    def get_history_config(self, *, default=False):
-        return bool(self.config.get('history_rates', default))
+    def get_history_config(self):
+        return bool(self.config.get('history_rates'))
 
     def set_history_config(self, b):
         self.config.set_key('history_rates', bool(b))
@@ -469,6 +444,3 @@ class FxThread(ThreadJob):
         from .util import timestamp_to_datetime
         date = timestamp_to_datetime(timestamp)
         return self.history_rate(date)
-
-
-assert globals().get(DEFAULT_EXCHANGE), f"default exchange {DEFAULT_EXCHANGE} does not exist"

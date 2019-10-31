@@ -32,14 +32,10 @@ from aiorpcx import TaskGroup, run_in_thread
 from .transaction import Transaction
 from .util import bh2u, make_aiohttp_session, NetworkJobOnDefaultServer
 from .bitcoin import address_to_scripthash, is_address
-from .network import UntrustedServerReturnedError
 
 if TYPE_CHECKING:
     from .network import Network
     from .address_synchronizer import AddressSynchronizer
-
-
-class SynchronizerFailure(Exception): pass
 
 
 def history_status(h):
@@ -139,7 +135,7 @@ class Synchronizer(SynchronizerBase):
                 and not self.requested_tx)
 
     async def _on_address_status(self, addr, status):
-        history = self.wallet.db.get_addr_history(addr)
+        history = self.wallet.history.get(addr, [])
         if history_status(history) == status:
             return
         if addr in self.requested_histories:
@@ -169,13 +165,13 @@ class Synchronizer(SynchronizerBase):
         # Remove request; this allows up_to_date to be True
         self.requested_histories.pop(addr)
 
-    async def _request_missing_txs(self, hist, *, allow_server_not_finding_tx=False):
+    async def _request_missing_txs(self, hist):
         # "hist" is a list of [tx_hash, tx_height] lists
         transaction_hashes = []
         for tx_hash, tx_height in hist:
             if tx_hash in self.requested_tx:
                 continue
-            if self.wallet.db.get_transaction(tx_hash):
+            if tx_hash in self.wallet.transactions:
                 continue
             transaction_hashes.append(tx_hash)
             self.requested_tx[tx_hash] = tx_height
@@ -183,45 +179,35 @@ class Synchronizer(SynchronizerBase):
         if not transaction_hashes: return
         async with TaskGroup() as group:
             for tx_hash in transaction_hashes:
-                await group.spawn(self._get_transaction(tx_hash, allow_server_not_finding_tx=allow_server_not_finding_tx))
+                await group.spawn(self._get_transaction, tx_hash)
 
-    async def _get_transaction(self, tx_hash, *, allow_server_not_finding_tx=False):
-        try:
-            result = await self.network.get_transaction(tx_hash)
-        except UntrustedServerReturnedError as e:
-            # most likely, "No such mempool or blockchain transaction"
-            if allow_server_not_finding_tx:
-                self.requested_tx.pop(tx_hash)
-                return
-            else:
-                raise
+    async def _get_transaction(self, tx_hash):
+        result = await self.network.get_transaction(tx_hash)
         tx = Transaction(result)
         try:
-            tx.deserialize()  # see if raises
-        except Exception as e:
-            # possible scenarios:
-            # 1: server is sending garbage
-            # 2: there is a bug in the deserialization code
-            # 3: there was a segwit-like upgrade that changed the tx structure
-            #    that we don't know about
-            raise SynchronizerFailure(f"cannot deserialize transaction {tx_hash}") from e
+            tx.deserialize()
+        except Exception:
+            self.print_msg("cannot deserialize transaction, skipping", tx_hash)
+            return
         if tx_hash != tx.txid():
-            raise SynchronizerFailure(f"received tx does not match expected txid ({tx_hash} != {tx.txid()})")
+            self.print_error("received tx does not match expected txid ({} != {})"
+                             .format(tx_hash, tx.txid()))
+            return
         tx_height = self.requested_tx.pop(tx_hash)
         self.wallet.receive_tx_callback(tx_hash, tx, tx_height)
-        self.print_error(f"received tx {tx_hash} height: {tx_height} bytes: {len(tx.raw)}")
+        self.print_error("received tx %s height: %d bytes: %d" %
+                         (tx_hash, tx_height, len(tx.raw)))
         # callbacks
         self.wallet.network.trigger_callback('new_transaction', self.wallet, tx)
 
     async def main(self):
         self.wallet.set_up_to_date(False)
         # request missing txns, if any
-        for addr in self.wallet.db.get_history():
-            history = self.wallet.db.get_addr_history(addr)
+        for history in self.wallet.history.values():
             # Old electrum servers returned ['*'] when all history for the address
             # was pruned. This no longer happens but may remain in old wallets.
             if history == ['*']: continue
-            await self._request_missing_txs(history, allow_server_not_finding_tx=True)
+            await self._request_missing_txs(history)
         # add addresses to bootstrap
         for addr in self.wallet.get_addresses():
             await self._add_address(addr)

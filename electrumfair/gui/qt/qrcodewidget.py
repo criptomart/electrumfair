@@ -89,6 +89,7 @@ class QRDialog(WindowModalDialog):
 
         vbox = QVBoxLayout()
         qrw = QRCodeWidget(data)
+        qscreen = QApplication.primaryScreen()
         vbox.addWidget(qrw, 1)
         if show_text:
             text = QTextEdit()
@@ -98,17 +99,17 @@ class QRDialog(WindowModalDialog):
         hbox = QHBoxLayout()
         hbox.addStretch(1)
 
-        config = electrumfair.get_config()
+        config = electrum.get_config()
         if config:
             filename = os.path.join(config.path, "qrcode.png")
 
             def print_qr():
-                p = qrw.grab()  # FIXME also grabs neutral colored padding
+                p = qscreen.grabWindow(qrw.winId())
                 p.save(filename, 'png')
                 self.show_message(_("QR code saved to file") + " " + filename)
 
             def copy_to_clipboard():
-                p = qrw.grab()
+                p = qscreen.grabWindow(qrw.winId())
                 QApplication.clipboard().setPixmap(p)
                 self.show_message(_("QR code copied to clipboard"))
 

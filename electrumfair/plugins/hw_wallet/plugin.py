@@ -26,9 +26,9 @@
 
 from ...plugin import BasePlugin, hook
 from ...i18n import _
-from ...bitcoin import is_address, TYPE_SCRIPT, opcodes
+from ...bitcoin import is_address, TYPE_SCRIPT
 from ...util import bfh, versiontuple, UserFacingException
-from ...transaction import TxOutput, Transaction
+from ...transaction import opcodes, TxOutput, Transaction
 
 
 class HW_PluginBase(BasePlugin):

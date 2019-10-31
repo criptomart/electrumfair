@@ -148,7 +148,7 @@ class Satoshis(object):
         return 'Satoshis(%d)'%self.value
 
     def __str__(self):
-        return format_satoshis(self.value)
+        return format_satoshis(self.value) + " FAIR"
 
     def __eq__(self, other):
         return self.value == other.value
@@ -174,7 +174,7 @@ class Fiat(object):
         if self.value is None or self.value.is_nan():
             return _('No Data')
         else:
-            return "{:.2f}".format(self.value)
+            return "{:.2f}".format(self.value) + ' ' + self.ccy
 
     def __eq__(self, other):
         return self.ccy == other.ccy and self.value == other.value
@@ -199,7 +199,7 @@ class MyEncoder(json.JSONEncoder):
             return obj.isoformat(' ')[:-3]
         if isinstance(obj, set):
             return list(obj)
-        return super().default(obj)
+        return super(MyEncoder, self).default(obj)
 
 class PrintError(object):
     '''A handy base class'''
@@ -371,6 +371,7 @@ def android_data_dir():
     import jnius
     PythonActivity = jnius.autoclass('org.kivy.android.PythonActivity')
     return PythonActivity.mActivity.getFilesDir().getPath() + '/data'
+
 
 def ensure_sparse_file(filename):
     # On modern Linux, no need to do anything.
@@ -718,7 +719,7 @@ def parse_URI(uri: str, on_pr: Callable=None) -> dict:
         out['address'] = address
     if 'amount' in out:
         am = out['amount']
-        m = re.match(r'([0-9.]+)X([0-9])', am)
+        m = re.match('([0-9\.]+)X([0-9])', am)
         if m:
             k = int(m.group(2)) - 8
             amount = Decimal(m.group(1)) * pow(  Decimal(10) , k)
@@ -754,25 +755,17 @@ def parse_URI(uri: str, on_pr: Callable=None) -> dict:
     return out
 
 
-def create_bip21_uri(addr, amount_sat: Optional[int], message: Optional[str],
-                     *, extra_query_params: Optional[dict] = None) -> str:
+def create_URI(addr, amount, message):
     from . import bitcoin
     if not bitcoin.is_address(addr):
         return ""
-    if extra_query_params is None:
-        extra_query_params = {}
     query = []
-    if amount_sat:
-        query.append('amount=%s'%format_satoshis_plain(amount_sat))
+    if amount:
+        query.append('amount=%s'%format_satoshis_plain(amount))
     if message:
         query.append('message=%s'%urllib.parse.quote(message))
-    for k, v in extra_query_params.items():
-        if not isinstance(k, str) or k != urllib.parse.quote(k):
-            raise Exception(f"illegal key for URI: {repr(k)}")
-        v = urllib.parse.quote(v)
-        query.append(f"{k}={v}")
     p = urllib.parse.ParseResult(scheme='faircoin', netloc='', path=addr, params='', query='&'.join(query), fragment='')
-    return str(urllib.parse.urlunparse(p))
+    return urllib.parse.urlunparse(p)
 
 
 # Python bug (http://bugs.python.org/issue1927) causes raw_input
@@ -904,13 +897,11 @@ class TxMinedInfo(NamedTuple):
     header_hash: Optional[str] = None  # hash of block that mined tx
 
 
-def make_aiohttp_session(proxy: Optional[dict], headers=None, timeout=None):
+def make_aiohttp_session(proxy: dict, headers=None, timeout=None):
     if headers is None:
         headers = {'User-Agent': 'Electrum'}
     if timeout is None:
         timeout = aiohttp.ClientTimeout(total=10)
-    elif isinstance(timeout, (int, float)):
-        timeout = aiohttp.ClientTimeout(total=timeout)
     ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=ca_path)
 
     if proxy:
@@ -921,10 +912,10 @@ def make_aiohttp_session(proxy: Optional[dict], headers=None, timeout=None):
             username=proxy.get('user', None),
             password=proxy.get('password', None),
             rdns=True,
-            ssl=ssl_context,
+            ssl_context=ssl_context,
         )
     else:
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        connector = aiohttp.TCPConnector(ssl_context=ssl_context)
 
     return aiohttp.ClientSession(headers=headers, timeout=timeout, connector=connector)
 

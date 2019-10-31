@@ -482,26 +482,26 @@ class HistoryList(MyTreeView, AcceptFileDragDrop):
         grid = QGridLayout()
         grid.addWidget(QLabel(_("Start")), 0, 0)
         grid.addWidget(QLabel(self.format_date(start_date)), 0, 1)
-        grid.addWidget(QLabel(str(h.get('fiat_start_value')) + '/BTC'), 0, 2)
+        grid.addWidget(QLabel(str(h.get('start_fiat_value')) + '/BTC'), 0, 2)
         grid.addWidget(QLabel(_("Initial balance")), 1, 0)
         grid.addWidget(QLabel(format_amount(h['start_balance'])), 1, 1)
-        grid.addWidget(QLabel(str(h.get('fiat_start_balance'))), 1, 2)
+        grid.addWidget(QLabel(str(h.get('start_fiat_balance'))), 1, 2)
         grid.addWidget(QLabel(_("End")), 2, 0)
         grid.addWidget(QLabel(self.format_date(end_date)), 2, 1)
-        grid.addWidget(QLabel(str(h.get('fiat_end_value')) + '/BTC'), 2, 2)
+        grid.addWidget(QLabel(str(h.get('end_fiat_value')) + '/BTC'), 2, 2)
         grid.addWidget(QLabel(_("Final balance")), 4, 0)
         grid.addWidget(QLabel(format_amount(h['end_balance'])), 4, 1)
-        grid.addWidget(QLabel(str(h.get('fiat_end_balance'))), 4, 2)
+        grid.addWidget(QLabel(str(h.get('end_fiat_balance'))), 4, 2)
         grid.addWidget(QLabel(_("Income")), 5, 0)
-        grid.addWidget(QLabel(format_amount(h.get('incoming'))), 5, 1)
-        grid.addWidget(QLabel(str(h.get('fiat_incoming'))), 5, 2)
+        grid.addWidget(QLabel(format_amount(h.get('income'))), 5, 1)
+        grid.addWidget(QLabel(str(h.get('fiat_income'))), 5, 2)
         grid.addWidget(QLabel(_("Expenditures")), 6, 0)
-        grid.addWidget(QLabel(format_amount(h.get('outgoing'))), 6, 1)
-        grid.addWidget(QLabel(str(h.get('fiat_outgoing'))), 6, 2)
+        grid.addWidget(QLabel(format_amount(h.get('expenditures'))), 6, 1)
+        grid.addWidget(QLabel(str(h.get('fiat_expenditures'))), 6, 2)
         grid.addWidget(QLabel(_("Capital gains")), 7, 0)
-        grid.addWidget(QLabel(str(h.get('fiat_capital_gains'))), 7, 2)
+        grid.addWidget(QLabel(str(h.get('capital_gains'))), 7, 2)
         grid.addWidget(QLabel(_("Unrealized gains")), 8, 0)
-        grid.addWidget(QLabel(str(h.get('fiat_unrealized_gains', ''))), 8, 2)
+        grid.addWidget(QLabel(str(h.get('unrealized_gains', ''))), 8, 2)
         vbox.addLayout(grid)
         vbox.addLayout(Buttons(CloseButton(d)))
         d.setLayout(vbox)
@@ -547,7 +547,7 @@ class HistoryList(MyTreeView, AcceptFileDragDrop):
             self.show_transaction(tx_item['txid'])
 
     def show_transaction(self, tx_hash):
-        tx = self.wallet.db.get_transaction(tx_hash)
+        tx = self.wallet.transactions.get(tx_hash)
         if not tx:
             return
         label = self.wallet.get_label(tx_hash) or None # prefer 'None' if not defined (force tx dialog to hide Description field if missing)
@@ -568,9 +568,7 @@ class HistoryList(MyTreeView, AcceptFileDragDrop):
             column_title = self.hm.headerData(column, Qt.Horizontal, Qt.DisplayRole)
             column_data = self.hm.data(idx, Qt.DisplayRole).value()
         tx_hash = tx_item['txid']
-        tx = self.wallet.db.get_transaction(tx_hash)
-        if not tx:
-            return
+        tx = self.wallet.transactions[tx_hash]
         tx_URL = block_explorer_URL(self.config, 'tx', tx_hash)
         height = self.wallet.get_tx_height(tx_hash).height
         is_relevant, is_mine, v, fee = self.wallet.get_wallet_delta(tx)
@@ -579,12 +577,7 @@ class HistoryList(MyTreeView, AcceptFileDragDrop):
         menu = QMenu()
         if height == TX_HEIGHT_LOCAL:
             menu.addAction(_("Remove"), lambda: self.remove_local_tx(tx_hash))
-
-        amount_columns = [HistoryColumns.COIN_VALUE, HistoryColumns.RUNNING_COIN_BALANCE, HistoryColumns.FIAT_VALUE, HistoryColumns.FIAT_ACQ_PRICE, HistoryColumns.FIAT_CAP_GAINS]
-        if column in amount_columns:
-            column_data = column_data.strip()
         menu.addAction(_("Copy {}").format(column_title), lambda: self.parent.app.clipboard().setText(column_data))
-
         for c in self.editable_columns:
             if self.isColumnHidden(c): continue
             label = self.hm.headerData(c, Qt.Horizontal, Qt.DisplayRole)
@@ -620,7 +613,7 @@ class HistoryList(MyTreeView, AcceptFileDragDrop):
             return
         for tx in to_delete:
             self.wallet.remove_transaction(tx)
-        self.wallet.storage.write()
+        self.wallet.save_transactions(write=True)
         # need to update at least: history_list, utxo_list, address_list
         self.parent.need_update.set()
 
@@ -691,7 +684,7 @@ class HistoryList(MyTreeView, AcceptFileDragDrop):
                 for line in lines:
                     transaction.writerow(line)
             else:
-                from ...util import json_encode
+                from electrum.util import json_encode
                 f.write(json_encode(txns))
 
     def text_txid_from_coordinate(self, row, col):
