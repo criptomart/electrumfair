@@ -73,7 +73,7 @@ class TrezorKeyStore(Hardware_KeyStore):
         for txin in tx.inputs():
             pubkeys, x_pubkeys = tx.get_sorted_pubkeys(txin)
             tx_hash = txin['prevout_hash']
-            if txin.get('prev_tx') is None and not Transaction.is_segwit_input(txin):
+            if txin.get('prev_tx') is None:
                 raise UserFacingException(_('Offline signing with {} is not supported for legacy inputs.').format(self.device))
             prev_tx[tx_hash] = txin['prev_tx']
             for x_pubkey in x_pubkeys:
@@ -99,7 +99,7 @@ class TrezorPlugin(HW_PluginBase):
     keystore_class = TrezorKeyStore
     minimum_library = (0, 11, 0)
     maximum_library = (0, 12)
-    SUPPORTED_XTYPES = ('standard') # 'standard' ,'p2wpkh-p2sh', 'p2wsh-p2sh', 'p2wpkh', 'p2wsh'
+    SUPPORTED_XTYPES = ('standard', ) # 'standard' ,'p2wpkh-p2sh', 'p2wsh-p2sh', 'p2wpkh', 'p2wsh'
     DEVICE_IDS = (TREZOR_PRODUCT_KEY,)
 
     MAX_LABEL_LEN = 32
@@ -160,7 +160,7 @@ class TrezorPlugin(HW_PluginBase):
         return client
 
     def get_coin_name(self):
-        return "Testnet" if constants.net.TESTNET else "Bitcoin"
+        return "Testnet" if constants.net.TESTNET else "FairCoin"
 
     def initialize_device(self, device_id, wizard, handler):
         # Initialization method
@@ -284,10 +284,6 @@ class TrezorPlugin(HW_PluginBase):
         return xpub
 
     def get_trezor_input_script_type(self, electrum_txin_type: str):
-        if electrum_txin_type in ('p2wpkh', 'p2wsh'):
-            return InputScriptType.SPENDWITNESS
-        if electrum_txin_type in ('p2wpkh-p2sh', 'p2wsh-p2sh'):
-            return InputScriptType.SPENDP2SHWITNESS
         if electrum_txin_type in ('p2pkh', ):
             return InputScriptType.SPENDADDRESS
         if electrum_txin_type in ('p2sh', ):
@@ -295,10 +291,6 @@ class TrezorPlugin(HW_PluginBase):
         raise ValueError('unexpected txin type: {}'.format(electrum_txin_type))
 
     def get_trezor_output_script_type(self, electrum_txin_type: str):
-        if electrum_txin_type in ('p2wpkh', 'p2wsh'):
-            return OutputScriptType.PAYTOWITNESS
-        if electrum_txin_type in ('p2wpkh-p2sh', 'p2wsh-p2sh'):
-            return OutputScriptType.PAYTOP2SHWITNESS
         if electrum_txin_type in ('p2pkh', ):
             return OutputScriptType.PAYTOADDRESS
         if electrum_txin_type in ('p2sh', ):
@@ -311,6 +303,12 @@ class TrezorPlugin(HW_PluginBase):
         inputs = self.tx_inputs(tx, xpub_path, True)
         outputs = self.tx_outputs(keystore.get_derivation(), tx)
         details = SignTx(lock_time=tx.locktime, version=tx.version)
+        print("sign_transaction -- details : %s" %details)
+        print("get_coin_name : %s" %self.get_coin_name())
+        print("derivation : %s" %keystore.get_derivation())
+        print("prev_tx : %s" %prev_tx)
+        print("inputs : %s" %inputs)
+        print("outputs : %s" %outputs)
         signatures, _ = client.sign_tx(self.get_coin_name(), inputs, outputs, details=details, prev_txes=prev_tx)
         signatures = [(bh2u(x) + '01') for x in signatures]
         tx.update_signatures(signatures)
@@ -422,6 +420,7 @@ class TrezorPlugin(HW_PluginBase):
                 txoutputtype.address = address
             return txoutputtype
 
+        print("tx_outputs -- derivation : %s -- tx : %s" %(derivation, tx))
         outputs = []
         has_change = False
         any_output_on_change_branch = is_any_tx_output_on_change_branch(tx)
@@ -447,7 +446,7 @@ class TrezorPlugin(HW_PluginBase):
             else:
                 txoutputtype = create_output_by_address()
             outputs.append(txoutputtype)
-
+        print("tx_output returning : %s" %outputs)
         return outputs
 
     def electrum_tx_to_txtype(self, tx, xpub_path):

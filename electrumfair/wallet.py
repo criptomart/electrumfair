@@ -142,7 +142,6 @@ def sweep(privkeys, network: 'Network', config: 'SimpleConfig', recipient, fee=N
         locktime = get_locktime_for_new_transaction(network)
 
     tx = Transaction.from_io(inputs, outputs, locktime=locktime, version=tx_version)
-    tx.set_rbf(True)
     tx.sign(keypairs)
     return tx
 
@@ -165,10 +164,6 @@ def get_locktime_for_new_transaction(network: 'Network') -> int:
     if random.randint(0, 9) == 0:
         locktime = max(0, locktime - random.randint(0, 99))
     return locktime
-
-
-
-class CannotBumpFee(Exception): pass
 
 
 class InternalAddressCorruption(Exception):
@@ -351,7 +346,6 @@ class Abstract_Wallet(AddressSynchronizer):
         is_relevant, is_mine, v, fee = self.get_wallet_delta(tx)
         exp_n = None
         can_broadcast = False
-        can_bump = False
         label = ''
         height = conf = timestamp = None
         tx_hash = tx.txid()
@@ -373,7 +367,6 @@ class Abstract_Wallet(AddressSynchronizer):
                         size = tx.estimated_size()
                         fee_per_byte = fee / size
                         exp_n = self.network.config.fee_to_depth(fee_per_byte)
-                    can_bump = is_mine and not tx.is_final()
                 else:
                     status = _('Local')
                     can_broadcast = self.network is not None
@@ -395,7 +388,7 @@ class Abstract_Wallet(AddressSynchronizer):
         else:
             amount = None
 
-        return tx_hash, status, label, can_broadcast, can_bump, amount, fee, height, conf, timestamp, exp_n
+        return tx_hash, status, label, can_broadcast, amount, fee, height, conf, timestamp, exp_n
 
     def get_spendable_coins(self, domain, config, *, nonlocal_only=False):
         confirmed_only = config.get('confirmed_only', False)
@@ -573,8 +566,6 @@ class Abstract_Wallet(AddressSynchronizer):
             if not tx:
                 return 2, 'unknown'
             is_final = tx and tx.is_final()
-            if not is_final:
-                extra.append('rbf')
             fee = self.get_wallet_delta(tx)[3]
             if fee is None:
                 fee = self.tx_fees.get(tx_hash)
@@ -691,26 +682,8 @@ class Abstract_Wallet(AddressSynchronizer):
             # Let the coin chooser select the coins to spend
             max_change = self.max_change_outputs if self.multiple_change else 1
             coin_chooser = coinchooser.get_coin_chooser(config)
-            # If there is an unconfirmed RBF tx, merge with it
-            base_tx = self.get_unconfirmed_base_tx_for_batching()
-            if config.get('batch_rbf', False) and base_tx:
-                is_local = self.get_tx_height(base_tx.txid()).height == TX_HEIGHT_LOCAL
-                base_tx = Transaction(base_tx.serialize())
-                base_tx.deserialize(force_full_parse=True)
-                base_tx.remove_signatures()
-                base_tx.add_inputs_info(self)
-                base_tx_fee = base_tx.get_fee()
-                relayfeerate = self.relayfee() / 1000
-                original_fee_estimator = fee_estimator
-                def fee_estimator(size: int) -> int:
-                    lower_bound = base_tx_fee + round(size * relayfeerate)
-                    lower_bound = lower_bound if not is_local else 0
-                    return max(lower_bound, original_fee_estimator(size))
-                txi = base_tx.inputs()
-                txo = list(filter(lambda o: not self.is_change(o.address), base_tx.outputs()))
-            else:
-                txi = []
-                txo = []
+            txi = []
+            txo = []
             tx = coin_chooser.make_tx(coins, txi, outputs[:] + txo, change_addrs[:max_change],
                                       fee_estimator, self.dust_threshold())
         else:
@@ -731,10 +704,9 @@ class Abstract_Wallet(AddressSynchronizer):
         return tx
 
     def mktx(self, outputs, password, config, fee=None, change_addr=None,
-             domain=None, rbf=False, nonlocal_only=False, *, tx_version=None):
+             domain=None, nonlocal_only=False, *, tx_version=None):
         coins = self.get_spendable_coins(domain, config, nonlocal_only=nonlocal_only)
         tx = self.make_unsigned_transaction(coins, outputs, config, fee, change_addr)
-        tx.set_rbf(rbf)
         if tx_version is not None:
             tx.version = tx_version
         self.sign_transaction(tx, password)
@@ -796,63 +768,6 @@ class Abstract_Wallet(AddressSynchronizer):
                 age = tx_age
         return age > age_limit
 
-    def bump_fee(self, tx, delta):
-        if tx.is_final():
-            raise CannotBumpFee(_('Cannot bump fee') + ': ' + _('transaction is final'))
-        tx = Transaction(tx.serialize())
-        tx.deserialize(force_full_parse=True)  # need to parse inputs
-        tx.remove_signatures()
-        tx.add_inputs_info(self)
-        inputs = tx.inputs()
-        outputs = tx.outputs()
-        # use own outputs
-        s = list(filter(lambda x: self.is_mine(x[1]), outputs))
-        # ... unless there is none
-        if not s:
-            s = outputs
-            x_fee = run_hook('get_tx_extra_fee', self, tx)
-            if x_fee:
-                x_fee_address, x_fee_amount = x_fee
-                s = filter(lambda x: x[1]!=x_fee_address, s)
-
-        # prioritize low value outputs, to get rid of dust
-        s = sorted(s, key=lambda x: x[2])
-        for o in s:
-            i = outputs.index(o)
-            if o.value - delta >= self.dust_threshold():
-                outputs[i] = o._replace(value=o.value-delta)
-                delta = 0
-                break
-            else:
-                del outputs[i]
-                delta -= o.value
-                if delta > 0:
-                    continue
-        if delta > 0:
-            raise CannotBumpFee(_('Cannot bump fee') + ': ' + _('could not find suitable outputs'))
-        locktime = get_locktime_for_new_transaction(self.network)
-        tx_new = Transaction.from_io(inputs, outputs, locktime=locktime)
-        return tx_new
-
-    def cpfp(self, tx, fee):
-        txid = tx.txid()
-        for i, o in enumerate(tx.outputs()):
-            address, value = o.address, o.value
-            if o.type == TYPE_ADDRESS and self.is_mine(address):
-                break
-        else:
-            return
-        coins = self.get_addr_utxo(address)
-        item = coins.get(txid+':%d'%i)
-        if not item:
-            return
-        self.add_input_info(item)
-        inputs = [item]
-        out_address = self.get_unused_address() or address
-        outputs = [TxOutput(TYPE_ADDRESS, out_address, value - fee)]
-        locktime = get_locktime_for_new_transaction(self.network)
-        return Transaction.from_io(inputs, outputs, locktime=locktime)
-
     def add_input_sig_info(self, txin, address):
         raise NotImplementedError()  # implemented by subclasses
 
@@ -861,12 +776,6 @@ class Abstract_Wallet(AddressSynchronizer):
         if self.is_mine(address):
             txin['address'] = address
             txin['type'] = self.get_txin_type(address)
-            # segwit needs value to sign
-            if txin.get('value') is None:
-                received, spent = self.get_addr_io(address)
-                item = received.get(txin['prevout_hash']+':%d'%txin['prevout_n'])
-                if item:
-                    txin['value'] = item[1]
             self.add_input_sig_info(txin, address)
 
     def can_sign(self, tx):
@@ -900,9 +809,7 @@ class Abstract_Wallet(AddressSynchronizer):
         # add previous tx for hw wallets
         for txin in tx.inputs():
             tx_hash = txin['prevout_hash']
-            # segwit inputs might not be needed for some hw wallets
-            ignore_timeout = Transaction.is_segwit_input(txin)
-            txin['prev_tx'] = self.get_input_tx(tx_hash, ignore_timeout)
+            txin['prev_tx'] = self.get_input_tx(tx_hash)
         # add output info for hw wallets
         info = {}
         xpubs = self.get_master_public_keys()
@@ -1455,7 +1362,7 @@ class Imported_Wallet(Simple_Wallet):
             except Exception:
                 bad_keys.append((key, _('invalid private key')))
                 continue
-            if txin_type not in ('p2pkh', 'p2wpkh', 'p2wpkh-p2sh'):
+            if txin_type not in ('p2pkh', ):
                 bad_keys.append((key, _('not implemented type') + f': {txin_type}'))
                 continue
             addr = bitcoin.pubkey_to_address(txin_type, pubkey)
@@ -1488,7 +1395,7 @@ class Imported_Wallet(Simple_Wallet):
             txin['x_pubkeys'] = [x_pubkey]
             txin['signatures'] = [None]
             return
-        if txin['type'] in ['p2pkh', 'p2wpkh', 'p2wpkh-p2sh']:
+        if txin['type'] in ['p2pkh']:
             pubkey = self.addresses[address]['pubkey']
             txin['num_sig'] = 1
             txin['x_pubkeys'] = [pubkey]

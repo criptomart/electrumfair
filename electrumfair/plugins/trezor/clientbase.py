@@ -210,6 +210,7 @@ class TrezorClientBase(PrintError):
 
     def sign_tx(self, *args, **kwargs):
         with self.run_flow():
+            print("sign_tx")
             return trezorlib.btc.sign_tx(self.client, *args, **kwargs)
 
     def reset_device(self, *args, **kwargs):

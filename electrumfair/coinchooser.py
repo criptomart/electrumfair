@@ -75,7 +75,6 @@ class Bucket(NamedTuple):
     value: int          # in satoshis
     coins: List[dict]   # UTXOs
     min_height: int     # min block height where a coin was confirmed
-    witness: bool       # whether any coin uses segwit
 
 
 def strip_unneeded(bkts, sufficient_funds):
@@ -101,14 +100,11 @@ class CoinChooserBase(PrintError):
             buckets[key].append(coin)
 
         def make_Bucket(desc, coins):
-            witness = any(Transaction.is_segwit_input(coin, guess_for_address=True) for coin in coins)
-            # note that we're guessing whether the tx uses segwit based
-            # on this single bucket
-            weight = sum(Transaction.estimated_input_weight(coin, witness)
+            weight = sum(Transaction.estimated_input_weight(coin)
                          for coin in coins)
             value = sum(coin['value'] for coin in coins)
             min_height = min(coin['height'] for coin in coins)
-            return Bucket(desc, weight, value, coins, min_height, witness)
+            return Bucket(desc, weight, value, coins, min_height)
 
         return list(map(make_Bucket, buckets.keys(), buckets.values()))
 
@@ -188,7 +184,7 @@ class CoinChooserBase(PrintError):
         return change
 
     def make_tx(self, coins, inputs, outputs, change_addrs, fee_estimator,
-                dust_threshold):
+                dust_threshold, tx_type=0, extra_payload=b''):
         """Select unspent coins to spend to pay outputs.  If the change is
         greater than dust_threshold (after adding the change output to
         the transaction) it is kept, otherwise none is sent and it is
@@ -202,13 +198,15 @@ class CoinChooserBase(PrintError):
         self.p = PRNG(''.join(sorted(utxos)))
 
         # Copy the outputs so when adding change we don't modify "outputs"
-        tx = Transaction.from_io(inputs[:], outputs[:])
+        tx = Transaction.from_io(inputs[:], outputs[:],
+                                 tx_type=tx_type,
+                                 extra_payload=extra_payload)
         input_value = tx.input_value()
 
         # Weight of the transaction with no inputs and no change
-        # Note: this will use legacy tx serialization as the need for "segwit"
-        # would be detected from inputs. The only side effect should be that the
-        # marker and flag are excluded, which is compensated in get_tx_weight()
+        # Note: this will use legacy tx serialization. The only side effect
+        # should be that the marker and flag are excluded, which is
+        # compensated in get_tx_weight()
         # FIXME calculation will be off by this (2 wu) in case of RBF batching
         base_weight = tx.estimated_weight()
         spent_amount = tx.output_value()
@@ -218,16 +216,6 @@ class CoinChooserBase(PrintError):
 
         def get_tx_weight(buckets):
             total_weight = base_weight + sum(bucket.weight for bucket in buckets)
-            is_segwit_tx = any(bucket.witness for bucket in buckets)
-            if is_segwit_tx:
-                total_weight += 2  # marker and flag
-                # non-segwit inputs were previously assumed to have
-                # a witness of '' instead of '00' (hex)
-                # note that mixed legacy/segwit buckets are already ok
-                num_legacy_inputs = sum((not bucket.witness) * len(bucket.coins)
-                                        for bucket in buckets)
-                total_weight += num_legacy_inputs
-
             return total_weight
 
         def sufficient_funds(buckets):

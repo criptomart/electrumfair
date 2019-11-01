@@ -639,33 +639,13 @@ def from_bip39_seed(seed, passphrase, derivation, xtype=None):
     return k
 
 
-PURPOSE48_SCRIPT_TYPES = {
-    'p2wsh-p2sh': 1,  # specifically multisig
-    'p2wsh': 2,       # specifically multisig
-}
-PURPOSE48_SCRIPT_TYPES_INV = inv_dict(PURPOSE48_SCRIPT_TYPES)
-
-
 def xtype_from_derivation(derivation: str) -> str:
     """Returns the script type to be used for this derivation."""
-    if derivation.startswith("m/84'"):
-        return 'p2wpkh'
-    elif derivation.startswith("m/49'"):
-        return 'p2wpkh-p2sh'
-    elif derivation.startswith("m/44'"):
+    if derivation.startswith("m/44'"):
         return 'standard'
-    elif derivation.startswith("m/45'"):
+    if derivation.startswith("m/45'"):
         return 'standard'
-
-    bip32_indices = list(bip32_derivation(derivation))
-    if len(bip32_indices) >= 4:
-        if bip32_indices[0] == 48 + BIP32_PRIME:
-            # m / purpose' / coin_type' / account' / script_type' / change / address_index
-            script_type_int = bip32_indices[3] - BIP32_PRIME
-            script_type = PURPOSE48_SCRIPT_TYPES_INV.get(script_type_int)
-            if script_type is not None:
-                return script_type
-    return 'standard'
+    raise Exception('Unknown bip43 derivation purpose %s' % derivation[:5])
 
 
 # extended pubkeys
@@ -777,34 +757,18 @@ def bip44_derivation(account_id, bip43_purpose=44):
     coin = constants.net.BIP44_COIN_TYPE
     return "m/%d'/%d'/%d'" % (bip43_purpose, coin, int(account_id))
 
-
-def purpose48_derivation(account_id: int, xtype: str) -> str:
-    # m / purpose' / coin_type' / account' / script_type' / change / address_index
-    bip43_purpose = 48
-    coin = constants.net.BIP44_COIN_TYPE
-    account_id = int(account_id)
-    script_type_int = PURPOSE48_SCRIPT_TYPES.get(xtype)
-    if script_type_int is None:
-        raise Exception('unknown xtype: {}'.format(xtype))
-    return "m/%d'/%d'/%d'/%d'" % (bip43_purpose, coin, account_id, script_type_int)
-
-
 def from_seed(seed, passphrase, is_p2sh=False):
     t = seed_type(seed)
     if t == 'old':
         keystore = Old_KeyStore({})
         keystore.add_seed(seed)
-    elif t in ['standard', 'segwit']:
+    elif t in ['standard']:
         keystore = BIP32_KeyStore({})
         keystore.add_seed(seed)
         keystore.passphrase = passphrase
         bip32_seed = Mnemonic.mnemonic_to_seed(seed, passphrase)
-        if t == 'standard':
-            der = "m/"
-            xtype = 'standard'
-        else:
-            der = "m/1'/" if is_p2sh else "m/0'/"
-            xtype = 'p2wsh' if is_p2sh else 'p2wpkh'
+        der = "m/"
+        xtype = 'standard'
         keystore.add_xprv_from_seed(bip32_seed, xtype, der)
     else:
         raise BitcoinException('Unexpected seed type {}'.format(t))

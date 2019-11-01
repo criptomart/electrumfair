@@ -444,7 +444,7 @@ class WalletStorage(JsonDB):
             self.put('wallet_type', 'standard')
             self.put('keystore', d)
 
-        elif (wallet_type == '2fa') or multisig_type(wallet_type):
+        elif multisig_type(wallet_type):
             for key in xpubs.keys():
                 d = {
                     'type': 'bip32',
@@ -516,9 +516,6 @@ class WalletStorage(JsonDB):
     def convert_version_15(self):
         if not self._is_upgrade_method_needed(14, 14):
             return
-        if self.get('seed_type') == 'segwit':
-            # should not get here; get_seed_version should have caught this
-            raise Exception('unsupported derivation (development segwit, v14)')
         self.put('seed_version', 15)
 
     def convert_version_16(self):
@@ -663,8 +660,6 @@ class WalletStorage(JsonDB):
             raise WalletFileException('This version of Electrum is too old to open this wallet.\n'
                                       '(highest supported storage version: {}, version of this file: {})'
                                       .format(FINAL_SEED_VERSION, seed_version))
-        if seed_version==14 and self.get('seed_type') == 'segwit':
-            self.raise_unsupported_version(seed_version)
         if seed_version >=12:
             return seed_version
         if seed_version not in [OLD_SEED_VERSION, NEW_SEED_VERSION]:

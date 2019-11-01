@@ -62,7 +62,7 @@ from ...util import (format_time, format_satoshis, format_fee_satoshis,
                            get_new_wallet_name, send_exception_to_crash_reporter)
 from ...transaction import Transaction, TxOutput
 from ...address_synchronizer import AddTransactionException
-from ...wallet import (Multisig_Wallet, CannotBumpFee, Abstract_Wallet,
+from ...wallet import (Multisig_Wallet, Abstract_Wallet,
                              sweep_preparations, InternalAddressCorruption)
 from ...version import ELECTRUMFAIR_VERSION
 from ...network import Network, TxBroadcastError, BestEffortRequestFailed
@@ -159,7 +159,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
             decimal_point_to_base_unit_name(self.decimal_point)
         except UnknownBaseUnit:
             self.decimal_point = DECIMAL_POINT_DEFAULT
-        self.num_zeros = int(config.get('num_zeros', 0))
+        self.num_zeros = int(config.get('num_zeros', 8))
 
         self.completions = QStringListModel()
 
@@ -1610,7 +1610,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
 
         #use_rbf = self.config.get('use_rbf', True)
         #if use_rbf:
-        tx.set_rbf(False)
+        #tx.set_rbf(False)
 
         #if fee < self.wallet.relayfee() * tx.estimated_size() / 1000:
         #    self.show_error('\n'.join([
@@ -2281,7 +2281,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
             self.show_message(_('Address not in wallet.'))
             return
         txin_type = self.wallet.get_txin_type(address)
-        if txin_type not in ['p2pkh', 'p2wpkh', 'p2wpkh-p2sh']:
+        if txin_type not in ['p2pkh']:
             self.show_message(_('Cannot sign messages with this type of address:') + \
                               ' ' + txin_type + '\n\n' + self.msg_sign)
             return

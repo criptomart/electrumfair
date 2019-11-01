@@ -899,7 +899,7 @@ class TxMinedInfo(NamedTuple):
 
 def make_aiohttp_session(proxy: dict, headers=None, timeout=None):
     if headers is None:
-        headers = {'User-Agent': 'Electrum'}
+        headers = {'User-Agent': 'ElectrumFair'}
     if timeout is None:
         timeout = aiohttp.ClientTimeout(total=10)
     ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=ca_path)

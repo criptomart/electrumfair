@@ -32,7 +32,7 @@ from typing import List, TYPE_CHECKING, Tuple, NamedTuple, Any
 from . import bitcoin
 from . import keystore
 from .bip32 import is_bip32_derivation, xpub_type
-from .keystore import bip44_derivation, purpose48_derivation
+from .keystore import bip44_derivation
 from .wallet import (Imported_Wallet, Standard_Wallet, Multisig_Wallet,
                      wallet_types, Wallet, Abstract_Wallet)
 from .storage import (WalletStorage, STO_EV_USER_PW, STO_EV_XPUB_PW,
@@ -124,7 +124,6 @@ class BaseWizard(object):
         ])
         wallet_kinds = [
             ('standard',  _("Standard wallet")),
-            ('2fa', _("Wallet with two-factor authentication")),
             ('multisig',  _("Multi-signature wallet")),
             ('imported',  _("Import FairCoin addresses or private keys")),
         ]
@@ -147,20 +146,12 @@ class BaseWizard(object):
                 exc = e
         self.waiting_dialog(do_upgrade, _('Upgrading wallet format...'), on_finished=on_finished)
 
-    def load_2fa(self):
-        self.storage.put('wallet_type', '2fa')
-        self.storage.put('use_trustedcoin', True)
-        self.plugin = self.plugins.load_plugin('trustedcoin')
-
     def on_wallet_type(self, choice):
         self.wallet_type = choice
         if choice == 'standard':
             action = 'choose_keystore'
         elif choice == 'multisig':
             action = 'choose_multisig'
-        elif choice == '2fa':
-            self.load_2fa()
-            action = self.storage.get_action()
         elif choice == 'imported':
             action = 'import_addresses_or_keys'
         self.run(action)
@@ -367,18 +358,14 @@ class BaseWizard(object):
             # There is no general standard for HD multisig.
             # For legacy, this is partially compatible with BIP45; assumes index=0
             # For segwit, a custom path is used, as there is no standard at all.
-            default_choice_idx = 2
+            default_choice_idx = 0
             choices = [
                 ('standard',   'legacy multisig (p2sh)',            "m/45'/0"),
-                ('p2wsh-p2sh', 'p2sh-segwit multisig (p2wsh-p2sh)', purpose48_derivation(0, xtype='p2wsh-p2sh')),
-                ('p2wsh',      'native segwit multisig (p2wsh)',    purpose48_derivation(0, xtype='p2wsh')),
             ]
         else:
-            default_choice_idx = 2
+            default_choice_idx = 0
             choices = [
                 ('standard',    'legacy (p2pkh)',            bip44_derivation(0, bip43_purpose=44)),
-                ('p2wpkh-p2sh', 'p2sh-segwit (p2wpkh-p2sh)', bip44_derivation(0, bip43_purpose=49)),
-                ('p2wpkh',      'native segwit (p2wpkh)',    bip44_derivation(0, bip43_purpose=84)),
             ]
         while True:
             try:
@@ -429,7 +416,7 @@ class BaseWizard(object):
     def restore_from_seed(self):
         self.opt_bip39 = True
         self.opt_ext = True
-        is_cosigning_seed = lambda x: bitcoin.seed_type(x) in ['standard', 'segwit']
+        is_cosigning_seed = lambda x: bitcoin.seed_type(x) in ['standard']
         test = bitcoin.is_seed if self.wallet_type == 'standard' else is_cosigning_seed
         self.restore_seed_dialog(run_next=self.on_restore_seed, test=test)
 
@@ -438,14 +425,11 @@ class BaseWizard(object):
         if self.seed_type == 'bip39':
             f = lambda passphrase: self.on_restore_bip39(seed, passphrase)
             self.passphrase_dialog(run_next=f, is_restoring=True) if is_ext else f('')
-        elif self.seed_type in ['standard', 'segwit']:
+        elif self.seed_type in ['standard']:
             f = lambda passphrase: self.run('create_keystore', seed, passphrase)
             self.passphrase_dialog(run_next=f, is_restoring=True) if is_ext else f('')
         elif self.seed_type == 'old':
             self.run('create_keystore', seed, '')
-        elif bitcoin.is_any_2fa_seed_type(self.seed_type):
-            self.load_2fa()
-            self.run('on_restore_seed', seed, is_ext)
         else:
             raise Exception('Unknown seed type', self.seed_type)
 
@@ -467,7 +451,7 @@ class BaseWizard(object):
         if has_xpub:
             t1 = xpub_type(k.xpub)
         if self.wallet_type == 'standard':
-            if has_xpub and t1 not in ['standard', 'p2wpkh', 'p2wpkh-p2sh']:
+            if has_xpub and t1 not in ['standard']:
                 self.show_error(_('Wrong key type') + ' %s'%t1)
                 self.run('choose_keystore')
                 return
@@ -475,7 +459,7 @@ class BaseWizard(object):
             self.run('create_wallet')
         elif self.wallet_type == 'multisig':
             assert has_xpub
-            if t1 not in ['standard', 'p2wsh', 'p2wsh-p2sh']:
+            if t1 not in ['standard']:
                 self.show_error(_('Wrong key type') + ' %s'%t1)
                 self.run('choose_keystore')
                 return
@@ -571,18 +555,13 @@ class BaseWizard(object):
         if message is None:
             message = ' '.join([
                 _("The type of addresses used by your wallet will depend on your seed."),
-                _("Segwit wallets use bech32 addresses, defined in BIP173."),
-                _("Please note that websites and other wallets may not support these addresses yet."),
-                _("Thus, you might want to keep using a non-segwit wallet in order to be able to receive bitcoins during the transition period.")
             ])
         if choices is None:
             choices = [
-                ('create_segwit_seed', _('Segwit')),
-                ('create_standard_seed', _('Legacy')),
+                ('create_standard_seed', _('Standard')),
             ]
         self.choice_dialog(title=title, message=message, choices=choices, run_next=self.run)
 
-    def create_segwit_seed(self): self.create_seed('segwit')
     def create_standard_seed(self): self.create_seed('standard')
 
     def create_seed(self, seed_type):
