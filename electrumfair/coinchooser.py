@@ -198,9 +198,7 @@ class CoinChooserBase(PrintError):
         self.p = PRNG(''.join(sorted(utxos)))
 
         # Copy the outputs so when adding change we don't modify "outputs"
-        tx = Transaction.from_io(inputs[:], outputs[:],
-                                 tx_type=tx_type,
-                                 extra_payload=extra_payload)
+        tx = Transaction.from_io(inputs[:], outputs[:])
         input_value = tx.input_value()
 
         # Weight of the transaction with no inputs and no change

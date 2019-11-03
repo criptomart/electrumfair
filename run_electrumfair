@@ -260,7 +260,6 @@ def init_plugins(config, gui_name):
     return Plugins(config, gui_name)
 
 
-
 if __name__ == '__main__':
     # The hook will only be used in the Qt GUI right now
     util.setup_thread_excepthook()

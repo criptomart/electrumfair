@@ -584,6 +584,7 @@ class Transaction:
         # by default we assume this is a partial txn;
         # this value will get properly set when deserializing
         self.is_partial_originally = True
+        self._segwit_ser = None  # None means "don't know"
         self.output_info = None  # type: Optional[Dict[str, TxOutputHwInfo]]
 
     def update(self, raw):
@@ -657,6 +658,7 @@ class Transaction:
         txin = self._inputs[i]
         txin['signatures'][signingPos] = sig
         txin['scriptSig'] = None  # force re-serialization
+        txin['witness'] = None    # force re-serialization
         self.raw = None
 
     def add_inputs_info(self, wallet):
@@ -682,6 +684,7 @@ class Transaction:
         self.locktime = d['lockTime']
         self.version = d['version']
         self.is_partial_originally = d['partial']
+        self._segwit_ser = d['segwit_ser']
         return d
 
     @classmethod
