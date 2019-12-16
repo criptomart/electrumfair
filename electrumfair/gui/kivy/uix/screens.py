@@ -175,7 +175,7 @@ class SendScreen(CScreen):
             return
         import electrumfair
         try:
-            uri = ...util.parse_URI(text, self.app.on_pr)
+            uri = parse_URI(text, self.app.on_pr)
         except:
             self.app.show_info(_("Not a FairCoin URI"))
             return
