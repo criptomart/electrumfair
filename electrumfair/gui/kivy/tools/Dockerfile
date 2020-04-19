@@ -126,11 +126,11 @@ RUN chown ${USER} /opt
 USER ${USER}
 
 
-RUN python3 -m pip install --upgrade cython==0.28.6
+  RUN python3 -m pip install --upgrade cython==0.28.6
 
 # prepare git
-RUN git config --global user.name "John Doe" \
-    && git config --global user.email johndoe@example.com
+RUN git config --global user.name "TonyFord" \
+    && git config --global user.email tonyford@strategy-investor.de
 
 # install buildozer
 RUN cd /opt \
