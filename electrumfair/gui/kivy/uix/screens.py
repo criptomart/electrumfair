@@ -363,7 +363,7 @@ class ReceiveScreen(CScreen):
         Clock.schedule_once(lambda dt: self.update_qr())
 
     def get_URI(self):
-        from electrumfair.util import create_URI
+        from electrumfair.util import create_bip21_uri
         amount = self.screen.amount
         if amount:
             a, u = self.screen.amount.split()

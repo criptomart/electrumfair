@@ -7,16 +7,16 @@ import traceback
 from decimal import Decimal
 import threading
 
-from electrumfair.bitcoin import TYPE_ADDRESS
-from electrumfair.storage import WalletStorage
-from electrumfair.wallet import Wallet, InternalAddressCorruption
-from electrumfair.paymentrequest import InvoiceStore
-from electrumfair.util import profiler, InvalidPassword, send_exception_to_crash_reporter
-from electrumfair.plugin import run_hook
-from electrumfair.util import format_satoshis, format_satoshis_plain
-from electrumfair.paymentrequest import PR_UNPAID, PR_PAID, PR_UNKNOWN, PR_EXPIRED
-from electrumfair import blockchain
-from electrumfair.network import Network, TxBroadcastError, BestEffortRequestFailed
+from ...bitcoin import TYPE_ADDRESS
+from ...storage import WalletStorage
+from ...wallet import Wallet, InternalAddressCorruption
+from ...paymentrequest import InvoiceStore
+from ...util import profiler, InvalidPassword, send_exception_to_crash_reporter
+from ...plugin import run_hook
+from ...util import format_satoshis, format_satoshis_plain
+from ...paymentrequest import PR_UNPAID, PR_PAID, PR_UNKNOWN, PR_EXPIRED
+from ... import blockchain
+from ...network import Network, TxBroadcastError, BestEffortRequestFailed
 from .i18n import _
 
 from kivy.app import App
@@ -70,7 +70,7 @@ Label.register('Roboto',
                'electrumfair/gui/kivy/data/fonts/Roboto-Bold.ttf')
 
 
-from electrumfair.util import (base_units, NoDynamicFeeEstimates, decimal_point_to_base_unit_name,
+from ...util import (base_units, NoDynamicFeeEstimates, decimal_point_to_base_unit_name,
                            base_unit_name_to_decimal_point, NotEnoughFunds, UnknownBaseUnit,
                            DECIMAL_POINT_DEFAULT)
 
@@ -119,7 +119,7 @@ class ElectrumWindow(App):
         from .uix.dialogs.choice_dialog import ChoiceDialog
         protocol = 's'
         def cb2(host):
-            from electrumfair import constants
+            from ... import constants
             pp = servers.get(host, constants.net.DEFAULT_PORTS)
             port = pp.get(protocol, '')
             popup.ids.host.text = host
@@ -338,7 +338,7 @@ class ElectrumWindow(App):
             self.send_screen.do_clear()
 
     def on_qr(self, data):
-        from electrumfair.bitcoin import base_decode, is_address
+        from ...bitcoin import base_decode, is_address
         data = data.strip()
         if is_address(data):
             self.set_URI(data)
@@ -347,8 +347,8 @@ class ElectrumWindow(App):
             self.set_URI(data)
             return
         # try to decode transaction
-        from electrumfair.transaction import Transaction
-        from electrumfair.util import bh2u
+        from ...transaction import Transaction
+        from ...util import bh2u
         try:
             text = bh2u(base_decode(data, None, base=43))
             tx = Transaction(text)
@@ -385,7 +385,7 @@ class ElectrumWindow(App):
         self.receive_screen.screen.address = addr
 
     def show_pr_details(self, req, status, is_invoice):
-        from electrumfair.util import format_time
+        from ...util import format_time
         requestor = req.get('requestor')
         exp = req.get('exp')
         memo = req.get('memo')
@@ -407,7 +407,7 @@ class ElectrumWindow(App):
         popup.open()
 
     def show_addr_details(self, req, status):
-        from electrumfair.util import format_time
+        from ...util import format_time
         fund = req.get('fund')
         isaddr = 'y'
         popup = Builder.load_file('electrumfair/gui/kivy/uix/ui_screens/invoice.kv')
@@ -553,10 +553,10 @@ class ElectrumWindow(App):
                 self.load_wallet(wallet)
         else:
             def launch_wizard():
-                storage = WalletStorage(path, manual_upgrades=True)
-                wizard = Factory.InstallWizard(self.electrum_config, self.plugins, storage )
+                wizard = Factory.InstallWizard(self.electrum_config, self.plugins)
                 wizard.path = path
                 wizard.bind(on_wizard_complete=self.on_wizard_complete)
+                storage = WalletStorage(path, manual_upgrades=True)
                 if not storage.file_exists():
                     wizard.run('new')
                 elif storage.is_encrypted():

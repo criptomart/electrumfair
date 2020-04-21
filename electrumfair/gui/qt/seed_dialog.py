@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (QVBoxLayout, QCheckBox, QHBoxLayout, QLineEdit,
                              QLabel, QCompleter, QDialog)
 
 from ...i18n import _
-from ...mnemonic import Mnemonic
+from ...mnemonic import Mnemonic, seed_type
 import electrumfair.old_mnemonic
 
 from .util import (Buttons, OkButton, WWLabel, ButtonsTextEdit, icon_path,
@@ -150,7 +150,7 @@ class SeedLayout(QVBoxLayout):
 
     def initialize_completer(self):
         english_list = Mnemonic('en').wordlist
-        old_list = electrum.old_mnemonic.words
+        old_list = electrumfair.old_mnemonic.words
         self.wordlist = english_list + list(set(old_list) - set(english_list)) #concat both lists
         self.wordlist.sort()
         self.completer = QCompleter(self.wordlist)
@@ -161,14 +161,13 @@ class SeedLayout(QVBoxLayout):
         return ' '.join(text.split())
 
     def on_edit(self):
-        from electrum.bitcoin import seed_type
         s = self.get_seed()
         b = self.is_seed(s)
         if not self.is_bip39:
             t = seed_type(s)
             label = _('Seed Type') + ': ' + t if t else ''
         else:
-            from electrum.keystore import bip39_is_checksum_valid
+            from ...keystore import bip39_is_checksum_valid
             is_checksum, is_wordlist = bip39_is_checksum_valid(s)
             status = ('checksum: ' + ('ok' if is_checksum else 'failed')) if is_wordlist else 'unknown wordlist'
             label = 'BIP39' + ' (%s)'%status

@@ -19,7 +19,7 @@ from electrumfair.base_wizard import BaseWizard
 from electrumfair.util import is_valid_email
 
 from . import EventsDialog
-from ...i18n import _
+from electrumfair.i18n import _
 from .password_dialog import PasswordDialog
 
 # global Variables

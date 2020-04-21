@@ -26,6 +26,8 @@
 import os
 import json
 
+from .util import inv_dict
+
 
 def read_json(filename, default):
     path = os.path.join(os.path.dirname(__file__), filename)
@@ -50,7 +52,7 @@ class BitcoinMainnet(AbstractNet):
     WIF_PREFIX = 0xdf
     ADDRTYPE_P2PKH = 95
     ADDRTYPE_P2SH = 36
-    #SEGWIT_HRP = "bc"
+    SEGWIT_HRP = "bc"
     GENESIS = "beed44fa5e96150d95d56ebd5d2625781825a9407a5215dd7eda723373a0a1d7"
     DEFAULT_PORTS = {'t': '51811', 's': '51812'}
     DEFAULT_SERVERS = read_json('servers.json', {})
@@ -58,18 +60,20 @@ class BitcoinMainnet(AbstractNet):
 
     XPRV_HEADERS = {
         'standard':    0x0488ade4,  # xprv
-        #'p2wpkh-p2sh': 0x049d7878,  # yprv
-        #'p2wsh-p2sh':  0x0295b005,  # Yprv
-        #'p2wpkh':      0x04b2430c,  # zprv
-        #'p2wsh':       0x02aa7a99,  # Zprv
+        'p2wpkh-p2sh': 0x049d7878,  # yprv
+        'p2wsh-p2sh':  0x0295b005,  # Yprv
+        'p2wpkh':      0x04b2430c,  # zprv
+        'p2wsh':       0x02aa7a99,  # Zprv
     }
+    XPRV_HEADERS_INV = inv_dict(XPRV_HEADERS)
     XPUB_HEADERS = {
         'standard':    0x0488b21e,  # xpub
-        #'p2wpkh-p2sh': 0x049d7cb2,  # ypub
-        #'p2wsh-p2sh':  0x0295b43f,  # Ypub
-        #'p2wpkh':      0x04b24746,  # zpub
-        #'p2wsh':       0x02aa7ed3,  # Zpub
+        'p2wpkh-p2sh': 0x049d7cb2,  # ypub
+        'p2wsh-p2sh':  0x0295b43f,  # Ypub
+        'p2wpkh':      0x04b24746,  # zpub
+        'p2wsh':       0x02aa7ed3,  # Zpub
     }
+    XPUB_HEADERS_INV = inv_dict(XPUB_HEADERS)
     BIP44_COIN_TYPE = 0
 
 
@@ -92,6 +96,7 @@ class BitcoinTestnet(AbstractNet):
         'p2wpkh':      0x045f18bc,  # vprv
         'p2wsh':       0x02575048,  # Vprv
     }
+    XPRV_HEADERS_INV = inv_dict(XPRV_HEADERS)
     XPUB_HEADERS = {
         'standard':    0x043587cf,  # tpub
         'p2wpkh-p2sh': 0x044a5262,  # upub
@@ -99,6 +104,7 @@ class BitcoinTestnet(AbstractNet):
         'p2wpkh':      0x045f1cf6,  # vpub
         'p2wsh':       0x02575483,  # Vpub
     }
+    XPUB_HEADERS_INV = inv_dict(XPUB_HEADERS)
     BIP44_COIN_TYPE = 1
 
 

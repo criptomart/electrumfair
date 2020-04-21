@@ -287,7 +287,7 @@ class Network(PrintError):
         return fut.result()
 
     @staticmethod
-    def get_instance():
+    def get_instance() -> Optional["Network"]:
         return INSTANCE
 
     def with_recent_servers_lock(func):
@@ -376,7 +376,8 @@ class Network(PrintError):
         async def get_donation_address():
             addr = await session.send_request('server.donation_address')
             if not bitcoin.is_address(addr):
-                self.print_error(f"invalid donation address from server: {addr}")
+                if addr:  # ignore empty string
+                    self.print_error(f"invalid donation address from server: {repr(addr)}")
                 addr = ''
             self.donation_address = addr
         async def get_server_peers():
@@ -515,31 +516,47 @@ class Network(PrintError):
 
     @staticmethod
     def _fast_getaddrinfo(host, *args, **kwargs):
-        def needs_dns_resolving(host2):
+        def needs_dns_resolving(host):
             try:
-                ipaddress.ip_address(host2)
+                ipaddress.ip_address(host)
                 return False  # already valid IP
             except ValueError:
                 pass  # not an IP
             if str(host) in ('localhost', 'localhost.',):
                 return False
             return True
-        try:
-            if needs_dns_resolving(host):
-                answers = dns.resolver.query(host)
-                addr = str(answers[0])
-            else:
-                addr = host
-        except dns.exception.DNSException as e:
-            # dns failed for some reason, e.g. dns.resolver.NXDOMAIN
-            # this is normal. Simply report back failure:
-            raise socket.gaierror(11001, 'getaddrinfo failed') from e
-        except BaseException as e:
-            # Possibly internal error in dnspython :( see #4483
+        def resolve_with_dnspython(host):
+            addrs = []
+            # try IPv6
+            try:
+                answers = dns.resolver.query(host, dns.rdatatype.AAAA)
+                addrs += [str(answer) for answer in answers]
+            except dns.exception.DNSException as e:
+                pass
+            except BaseException as e:
+                print_error(f'dnspython failed to resolve dns (AAAA) with error: {e}')
+            # try IPv4
+            try:
+                answers = dns.resolver.query(host, dns.rdatatype.A)
+                addrs += [str(answer) for answer in answers]
+            except dns.exception.DNSException as e:
+                # dns failed for some reason, e.g. dns.resolver.NXDOMAIN this is normal.
+                # Simply report back failure; except if we already have some results.
+                if not addrs:
+                    raise socket.gaierror(11001, 'getaddrinfo failed') from e
+            except BaseException as e:
+                # Possibly internal error in dnspython :( see #4483
+                print_error(f'dnspython failed to resolve dns (A) with error: {e}')
+            if addrs:
+                return addrs
             # Fall back to original socket.getaddrinfo to resolve dns.
-            print_error('dnspython failed to resolve dns with error:', e)
-            addr = host
-        return socket._getaddrinfo(addr, *args, **kwargs)
+            return [host]
+        addrs = [host]
+        if needs_dns_resolving(host):
+            addrs = resolve_with_dnspython(host)
+        list_of_list_of_socketinfos = [socket._getaddrinfo(addr, *args, **kwargs) for addr in addrs]
+        list_of_socketinfos = [item for lst in list_of_list_of_socketinfos for item in lst]
+        return list_of_socketinfos
 
     @log_exceptions
     async def set_parameters(self, net_params: NetworkParameters):
@@ -780,7 +797,7 @@ class Network(PrintError):
             try:
                 return await func(self, *args, **kwargs)
             except aiorpcx.jsonrpc.CodeMessageError as e:
-                raise UntrustedServerReturnedError(original_exception=e)
+                raise UntrustedServerReturnedError(original_exception=e) from e
         return wrapper
 
     @best_effort_reliable
@@ -1147,8 +1164,10 @@ class Network(PrintError):
                     raise
             await asyncio.sleep(0.1)
 
-
-    async def _send_http_on_proxy(self, method: str, url: str, params: str = None, body: bytes = None, json: dict = None, headers=None, on_finish=None):
+    @classmethod
+    async def _send_http_on_proxy(cls, method: str, url: str, params: str = None,
+                                  body: bytes = None, json: dict = None, headers=None,
+                                  on_finish=None, timeout=None):
         async def default_on_finish(resp: ClientResponse):
             resp.raise_for_status()
             return await resp.text()
@@ -1156,7 +1175,9 @@ class Network(PrintError):
             headers = {}
         if on_finish is None:
             on_finish = default_on_finish
-        async with make_aiohttp_session(self.proxy) as session:
+        network = cls.get_instance()
+        proxy = network.proxy if network else None
+        async with make_aiohttp_session(proxy, timeout=timeout) as session:
             if method == 'get':
                 async with session.get(url, params=params, headers=headers) as resp:
                     return await on_finish(resp)
@@ -1171,14 +1192,17 @@ class Network(PrintError):
             else:
                 assert False
 
-    @staticmethod
-    def send_http_on_proxy(method, url, **kwargs):
-        network = Network.get_instance()
-        assert network._loop_thread is not threading.currentThread()
-        coro = asyncio.run_coroutine_threadsafe(network._send_http_on_proxy(method, url, **kwargs), network.asyncio_loop)
-        return coro.result(5)
-
-
+    @classmethod
+    def send_http_on_proxy(cls, method, url, **kwargs):
+        network = cls.get_instance()
+        if network:
+            assert network._loop_thread is not threading.currentThread()
+            loop = network.asyncio_loop
+        else:
+            loop = asyncio.get_event_loop()
+        coro = asyncio.run_coroutine_threadsafe(cls._send_http_on_proxy(method, url, **kwargs), loop)
+        # note: _send_http_on_proxy has its own timeout, so no timeout here:
+        return coro.result()
 
     # methods used in scripts
     async def get_peers(self):
@@ -1188,24 +1212,21 @@ class Network(PrintError):
         return parse_servers(await session.send_request('server.peers.subscribe'))
 
     async def send_multiple_requests(self, servers: List[str], method: str, params: Sequence):
-        num_connecting = len(self.connecting)
-        for server in servers:
-            self._start_interface(server)
-        # sleep a bit
-        for _ in range(10):
-            if len(self.connecting) < num_connecting:
-                break
-            await asyncio.sleep(1)
         responses = dict()
-        async def get_response(iface: Interface):
+        async def get_response(server):
+            interface = Interface(self, server, self.proxy)
+            timeout = self.get_network_timeout_seconds(NetworkTimeout.Urgent)
             try:
-                res = await iface.session.send_request(method, params, timeout=10)
+                await asyncio.wait_for(interface.ready, timeout)
+            except BaseException as e:
+                await interface.close()
+                return
+            try:
+                res = await interface.session.send_request(method, params, timeout=10)
             except Exception as e:
                 res = e
-            responses[iface.server] = res
+            responses[interface.server] = res
         async with TaskGroup() as group:
             for server in servers:
-                interface = self.interfaces.get(server)
-                if interface:
-                    await group.spawn(get_response(interface))
+                await group.spawn(get_response(server))
         return responses

@@ -119,7 +119,7 @@ class SimpleConfig(PrintError):
             path = os.path.join(path, 'simnet')
             make_dir(path, allow_symlink=False)
 
-        self.print_error("electrumfair directory", path)
+        #self.print_error("electrumfair directory", path)
         return path
 
     def rename_config_keys(self, config, keypairs, deprecation_warning=False):
@@ -397,11 +397,14 @@ class SimpleConfig(PrintError):
         """Returns (text, tooltip) where
         text is what we target: static fee / num blocks to confirm in / mempool depth
         tooltip is the corresponding estimate (e.g. num blocks for a static fee)
+
+        fee_rate is in sat/kbyte
         """
         if fee_rate is None:
             rate_str = 'unknown'
         else:
-            rate_str = format_fee_satoshis(fee_rate/1000) + ' sat/byte'
+            fee_rate = fee_rate/1000
+            rate_str = format_fee_satoshis(fee_rate) + ' sat/byte'
 
         if dyn:
             if mempool:
@@ -554,9 +557,8 @@ class SimpleConfig(PrintError):
             device = ''
         return device
 
-
 def read_user_config(path):
-    """Parse and store the user config settings in electrum.conf into user_config[]."""
+    """Parse and store the user config settings in electrumfair.conf into user_config[]."""
     if not path:
         return {}
     config_path = os.path.join(path, "config")

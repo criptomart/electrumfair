@@ -9,7 +9,6 @@ SEED_PREFIX_SW     = '100'     # Segwit wallet
 SEED_PREFIX_2FA    = '101'     # Two-factor authentication
 SEED_PREFIX_2FA_SW = '102'     # Two-factor auth, using segwit
 
-
 def seed_prefix(seed_type):
     if seed_type == 'standard':
         return SEED_PREFIX

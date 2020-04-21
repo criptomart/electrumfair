@@ -1,10 +1,11 @@
 import time
 from struct import pack
 
+from ... import ecc
 from ...i18n import _
 from ...util import PrintError, UserCancelled, UserFacingException
 from ...keystore import bip39_normalize_passphrase
-from ...bip32 import serialize_xpub, convert_bip32_path_to_list_of_uint32 as parse_path
+from ...bip32 import BIP32Node, convert_bip32_path_to_list_of_uint32 as parse_path
 
 from trezorlib.client import TrezorClient
 from trezorlib.exceptions import TrezorFailure, Cancelled, OutdatedFirmwareError
@@ -120,7 +121,12 @@ class TrezorClientBase(PrintError):
         address_n = parse_path(bip32_path)
         with self.run_flow(creating_wallet=creating):
             node = trezorlib.btc.get_public_node(self.client, address_n).node
-        return serialize_xpub(xtype, node.chain_code, node.public_key, node.depth, self.i4b(node.fingerprint), self.i4b(node.child_num))
+        return BIP32Node(xtype=xtype,
+                         eckey=ecc.ECPubkey(node.public_key),
+                         chaincode=node.chain_code,
+                         depth=node.depth,
+                         fingerprint=self.i4b(node.fingerprint),
+                         child_number=self.i4b(node.child_num)).to_xpub()
 
     def toggle_passphrase(self):
         if self.features.passphrase_protection:
@@ -247,7 +253,7 @@ class TrezorClientBase(PrintError):
             msg = _("Enter a passphrase to generate this wallet.  Each time "
                     "you use this wallet your {} will prompt you for the "
                     "passphrase.  If you forget the passphrase you cannot "
-                    "access the faircoins in the wallet.").format(self.device)
+                    "access the bitcoins in the wallet.").format(self.device)
         else:
             msg = _("Enter the passphrase to unlock this wallet:")
         passphrase = self.handler.get_passphrase(msg, self.creating_wallet)
