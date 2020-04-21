@@ -50,5 +50,5 @@ ElectrumFair-3.3.4.0-debug.apk
 
 ```
 ElectrumFair-3.3.4.0-release.apk
-99dac76e05c31b82b0bcf3eb41da339814635522ae2cc4a81371d7ea15951bb2
+235dcf61d4abcb2cdfb400136d4eebbaf70518d9241803ba9d2735767ef20472
 ```
